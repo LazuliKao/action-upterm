@@ -284,26 +284,27 @@ async function setupSessionTimeout(waitTimeoutMinutes: string): Promise<void> {
 }
 
 async function collectDiagnostics(): Promise<string> {
-  const uptermDir = getUptermSocketDir();
+  const socketDirs = getUptermSocketDirs();
   let diagnostics = 'Failed to start upterm - socket not found after maximum retries.\n\nDiagnostics:\n';
 
-  diagnostics += `- Expected socket directory: ${uptermDir}\n`;
+  diagnostics += `- Searched socket directories:\n`;
+  for (const uptermDir of socketDirs) {
+    if (fs.existsSync(uptermDir)) {
+      const files = fs.readdirSync(uptermDir);
+      diagnostics += `  * ${uptermDir}: exists, contains [${files.join(', ') || 'empty'}]\n`;
 
-  if (fs.existsSync(uptermDir)) {
-    const files = fs.readdirSync(uptermDir);
-    diagnostics += `- Socket directory contains: ${files.join(', ')}\n`;
-
-    const logPath = path.join(uptermDir, 'upterm.log');
-    if (fs.existsSync(logPath)) {
-      try {
-        const logContent = fs.readFileSync(logPath, 'utf8');
-        diagnostics += `- Upterm log:\n${logContent}\n`;
-      } catch (error) {
-        diagnostics += `- Could not read upterm.log: ${error}\n`;
+      const logPath = path.join(uptermDir, 'upterm.log');
+      if (fs.existsSync(logPath)) {
+        try {
+          const logContent = fs.readFileSync(logPath, 'utf8');
+          diagnostics += `    - Upterm log:\n${logContent}\n`;
+        } catch (error) {
+          diagnostics += `    - Could not read upterm.log: ${error}\n`;
+        }
       }
+    } else {
+      diagnostics += `  * ${uptermDir}: does not exist\n`;
     }
-  } else {
-    diagnostics += '- Socket directory does not exist\n';
   }
 
   // Check tmux sessions
@@ -351,11 +352,33 @@ async function collectDiagnostics(): Promise<string> {
   return diagnostics;
 }
 
+async function checkUptermReady(): Promise<boolean> {
+  // First try to find socket file
+  if (uptermSocketExists()) {
+    return true;
+  }
+
+  // Fallback: try running upterm session current without socket path
+  // upterm 0.20.0+ may not always create socket in expected locations
+  try {
+    const output = await execShellCommand('upterm session current 2>&1');
+    // If the command succeeds and shows session info, upterm is ready
+    if (output.includes('Session:') || output.includes('SSH Command:') || output.includes('Command:')) {
+      core.debug('Upterm ready detected via session current command');
+      return true;
+    }
+  } catch {
+    // Command failed, upterm not ready yet
+  }
+
+  return false;
+}
+
 async function waitForUptermReady(): Promise<void> {
   let tries = UPTERM_READY_MAX_RETRIES;
   while (tries-- > 0) {
     core.info(`Waiting for upterm to be ready... (${UPTERM_READY_MAX_RETRIES - tries}/${UPTERM_READY_MAX_RETRIES})`);
-    if (uptermSocketExists()) return;
+    if (await checkUptermReady()) return;
     await sleep(UPTERM_SOCKET_POLL_INTERVAL);
   }
 
@@ -400,17 +423,20 @@ async function monitorSession(): Promise<void> {
       break;
     }
 
-    if (!uptermSocketExists()) {
+    // Check if upterm is still running
+    if (!(await checkUptermReady())) {
       core.info("Exiting debugging session: 'upterm' quit");
       break;
     }
 
     try {
       const socketPath = findUptermSocket();
-      if (!socketPath) {
-        throw new Error('Socket file not found');
+      if (socketPath) {
+        core.info(await execShellCommand(`upterm session current --admin-socket "${socketPath}"`));
+      } else {
+        // Try without socket path (upterm 0.20.0+ may work without explicit socket)
+        core.info(await execShellCommand('upterm session current'));
       }
-      core.info(await execShellCommand(`upterm session current --admin-socket "${socketPath}"`));
     } catch (error) {
       // Check if this error is due to timeout before throwing
       if (isTimeoutReached()) {
@@ -431,31 +457,59 @@ async function monitorSession(): Promise<void> {
   }
 }
 
-function getUptermSocketDir(): string {
+function getUptermSocketDirs(): string[] {
   // Upterm uses adrg/xdg library for socket storage
   // See: https://github.com/owenthereal/upterm/pull/398
   // XDG RuntimeDir: https://pkg.go.dev/github.com/adrg/xdg#RuntimeDir
+  // 
+  // The xdg library has fallback behavior when XDG_RUNTIME_DIR is not set:
+  // 1. First tries $XDG_RUNTIME_DIR
+  // 2. Falls back to /run/user/$UID
+  // 3. If that doesn't exist, may fall back to /tmp or other locations
+  const dirs: string[] = [];
+
   if (process.platform === 'linux') {
-    // Linux: $XDG_RUNTIME_DIR/upterm or /run/user/$(id -u)/upterm
-    const uid = process.getuid ? process.getuid() : '1000';
-    return process.env.XDG_RUNTIME_DIR ? path.join(process.env.XDG_RUNTIME_DIR, 'upterm') : `/run/user/${uid}/upterm`;
+    // Primary: $XDG_RUNTIME_DIR/upterm
+    if (process.env.XDG_RUNTIME_DIR) {
+      dirs.push(path.join(process.env.XDG_RUNTIME_DIR, 'upterm'));
+    }
+    // Fallback: /run/user/$(id -u)/upterm
+    const uid = process.getuid ? process.getuid() : 1000;
+    dirs.push(`/run/user/${uid}/upterm`);
+    // Additional fallback paths for Docker containers where /run/user doesn't exist
+    // xdg library may use /tmp as fallback
+    dirs.push('/tmp/upterm');
+    dirs.push(path.join(os.homedir(), '.local', 'share', 'upterm'));
+    dirs.push(path.join(os.homedir(), '.upterm'));
   } else if (process.platform === 'darwin') {
     // macOS: ~/Library/Application Support/upterm
-    return path.join(os.homedir(), 'Library', 'Application Support', 'upterm');
+    dirs.push(path.join(os.homedir(), 'Library', 'Application Support', 'upterm'));
   } else {
     // Windows: %LOCALAPPDATA%\upterm
-    return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'upterm');
+    dirs.push(path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'upterm'));
   }
+
+  return dirs;
+}
+
+// Keep for backwards compatibility and diagnostics
+function getUptermSocketDir(): string {
+  const dirs = getUptermSocketDirs();
+  return dirs[0];
 }
 
 function findUptermSocket(): string | null {
-  const uptermDir = getUptermSocketDir();
-  if (!fs.existsSync(uptermDir)) return null;
+  // Try all possible socket directories
+  for (const uptermDir of getUptermSocketDirs()) {
+    if (!fs.existsSync(uptermDir)) continue;
 
-  const socketFile = fs.readdirSync(uptermDir).find(file => file.endsWith('.sock'));
-  if (!socketFile) return null;
+    const socketFile = fs.readdirSync(uptermDir).find(file => file.endsWith('.sock'));
+    if (socketFile) {
+      return toShellPath(path.join(uptermDir, socketFile));
+    }
+  }
 
-  return toShellPath(path.join(uptermDir, socketFile));
+  return null;
 }
 
 function uptermSocketExists(): boolean {
