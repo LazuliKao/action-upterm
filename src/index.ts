@@ -125,6 +125,7 @@ async function installDependencies(): Promise<void> {
 
       core.addPath(extractDir);
       await execShellCommand('if ! command -v tmux &>/dev/null; then sudo apt-get update && sudo apt-get -y install tmux; fi');
+      await execShellCommand('if ! command -v screen &>/dev/null; then sudo apt-get update && sudo apt-get -y install screen; fi');
     },
     win32: async () => {
       const uptermArch = validateArchitecture(process.arch);
