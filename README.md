@@ -52,6 +52,28 @@ jobs:
 
 If your registered public SSH key differs from your default private SSH key, specify the path manually: `ssh -i <path-to-private-key> <upterm-connection-string>`.
 
+## Use Custom SSH Public Keys
+
+You can also directly provide SSH public key(s) to authorize access, without relying on GitHub profiles:
+
+```yaml
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup upterm session
+      uses: owenthereal/action-upterm@v1
+      with:
+        authorized-keys: |
+          ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAB... user@example.com
+          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... another@example.com
+```
+
+Multiple keys can be separated by newlines. This is useful when you want to grant access to users who haven't registered their SSH keys on GitHub.
+
 ## Use Custom Upterm Server
 
 To host your own Upterm server, follow the instructions for [deployment across various cloud providers](https://github.com/owenthereal/upterm?tab=readme-ov-file#hammer_and_wrench-deployment).

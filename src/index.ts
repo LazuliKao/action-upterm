@@ -217,8 +217,22 @@ function getAllowedUsers(): string[] {
   return [...new Set(allowedUsers)];
 }
 
-function buildAuthorizedKeysParameter(allowedUsers: string[]): string {
-  return allowedUsers.map(user => `--github-user '${user}'`).join(' ') + ' ';
+function buildAuthorizedKeysParameter(allowedUsers: string[], authorizedKeysFile?: string): string {
+  const parts: string[] = [];
+  const userParts = allowedUsers.map(user => `--github-user '${user}'`).filter(Boolean);
+  if (userParts.length) parts.push(...userParts);
+  if (authorizedKeysFile) parts.push(`--authorized-keys '${toShellPath(authorizedKeysFile)}'`);
+  return parts.length ? parts.join(' ') + ' ' : '';
+}
+
+function getAuthorizedKeysFilePath(): string {
+  return process.platform === 'win32' ? 'C:/msys64/tmp/upterm-authorized-keys' : '/tmp/upterm-authorized-keys';
+}
+
+function writeAuthorizedKeysFile(keysContent: string): string {
+  const filePath = getAuthorizedKeysFilePath();
+  fs.writeFileSync(filePath, keysContent.trim() + '\n', {mode: 0o600});
+  return filePath;
 }
 
 async function createUptermSession(uptermServer: string, authorizedKeysParameter: string): Promise<void> {
@@ -345,7 +359,9 @@ async function waitForUptermReady(): Promise<void> {
 
 async function startUptermSession(): Promise<void> {
   const allowedUsers = getAllowedUsers();
-  const authorizedKeysParameter = buildAuthorizedKeysParameter(allowedUsers);
+  const authorizedKeysInput = core.getInput('authorized-keys');
+  const authorizedKeysFile = authorizedKeysInput ? writeAuthorizedKeysFile(authorizedKeysInput) : undefined;
+  const authorizedKeysParameter = buildAuthorizedKeysParameter(allowedUsers, authorizedKeysFile);
   const uptermServer = core.getInput('upterm-server');
   const waitTimeoutMinutes = core.getInput('wait-timeout-minutes');
 

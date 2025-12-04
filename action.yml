@@ -16,6 +16,10 @@ inputs:
     description: "If only the public SSH keys of the listed GitHub users should be authorized"
     required: false
     default: ""
+  authorized-keys:
+    description: "SSH public key(s) to authorize for access (text content, not file path). Multiple keys can be separated by newlines."
+    required: false
+    default: ""
   upterm-server:
     description: "upterm server address (required), supported protocols are ssh, ws, or wss."
     required: true
