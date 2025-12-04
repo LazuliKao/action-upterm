@@ -235,11 +235,18 @@ function writeAuthorizedKeysFile(keysContent: string): string {
   return filePath;
 }
 
-async function createUptermSession(uptermServer: string, authorizedKeysParameter: string): Promise<void> {
+async function createUptermSession(uptermServer: string, authorizedKeysParameter: string, hideClientIp: boolean, forceCommand: string): Promise<void> {
   core.info(`Creating a new session. Connecting to upterm server ${uptermServer}`);
+  
+  // Build additional flags
+  const hideClientIpFlag = hideClientIp ? '--hide-client-ip ' : '';
+  // Use custom force-command if provided, otherwise default to tmux attach
+  const effectiveForceCommand = forceCommand || 'tmux attach -t upterm';
+  const forceCommandFlag = `--force-command '${effectiveForceCommand}' `;
+  
   try {
     await execShellCommand(
-      `tmux new -d -s upterm-wrapper -x ${TMUX_DIMENSIONS.width} -y ${TMUX_DIMENSIONS.height} "upterm host --skip-host-key-check --accept --server '${uptermServer}' ${authorizedKeysParameter} --force-command 'tmux attach -t upterm' -- tmux new -s upterm -x ${TMUX_DIMENSIONS.width} -y ${TMUX_DIMENSIONS.height} 2>&1 | tee ${getUptermCommandLogPath()}" 2>${getTmuxErrorLogPath()}`
+      `tmux new -d -s upterm-wrapper -x ${TMUX_DIMENSIONS.width} -y ${TMUX_DIMENSIONS.height} "upterm host --skip-host-key-check --accept --server '${uptermServer}' ${authorizedKeysParameter}${hideClientIpFlag}${forceCommandFlag}-- tmux new -s upterm -x ${TMUX_DIMENSIONS.width} -y ${TMUX_DIMENSIONS.height} 2>&1 | tee ${getUptermCommandLogPath()}" 2>${getTmuxErrorLogPath()}`
     );
     await execShellCommand('tmux set -t upterm-wrapper window-size largest; tmux set -t upterm window-size largest');
     core.debug('Created new session successfully');
@@ -364,8 +371,10 @@ async function startUptermSession(): Promise<void> {
   const authorizedKeysParameter = buildAuthorizedKeysParameter(allowedUsers, authorizedKeysFile);
   const uptermServer = core.getInput('upterm-server');
   const waitTimeoutMinutes = core.getInput('wait-timeout-minutes');
+  const hideClientIp = core.getInput('hide-client-ip') === 'true';
+  const forceCommand = core.getInput('force-command');
 
-  await createUptermSession(uptermServer, authorizedKeysParameter);
+  await createUptermSession(uptermServer, authorizedKeysParameter, hideClientIp, forceCommand);
   await sleep(UPTERM_INIT_DELAY);
 
   if (waitTimeoutMinutes) {

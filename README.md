@@ -114,6 +114,48 @@ jobs:
         wait-timeout-minutes: 5
 ```
 
+## Hide Client IP Address
+
+To hide client IP addresses from the output (useful for privacy concerns):
+
+```yaml
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup upterm session
+      uses: owenthereal/action-upterm@v1
+      with:
+        hide-client-ip: true
+```
+
+## Custom Force Command
+
+By default, clients are forced to run `tmux attach -t upterm` when connecting. You can customize this behavior with the `force-command` input:
+
+```yaml
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup upterm session
+      uses: owenthereal/action-upterm@v1
+      with:
+        ## Use screen instead of tmux
+        force-command: 'screen -x upterm'
+```
+
+Other examples:
+- `tmux attach -t upterm` (default)
+- `screen -x upterm` - Use GNU Screen
+- `bash` - Direct bash shell access
+
 ## Continue a Workflow
 
 To resume your workflow within an `upterm` session, create an empty file named `continue`:

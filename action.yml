@@ -28,3 +28,11 @@ inputs:
     description: "Integer number of minutes to wait for user to connect before shutting down server. Once a user connects, the server will stay up."
     required: false
     default: ""
+  hide-client-ip:
+    description: "Hide client IP addresses from output."
+    required: false
+    default: "false"
+  force-command:
+    description: "Enforce a specified command for clients to join, and link the command's input/output to the client's terminal."
+    required: false
+    default: ""
